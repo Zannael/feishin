@@ -65,7 +65,9 @@ class AppUpdater {
         console.log('Effective update channel:', effectiveChannel);
         if (effectiveChannel === 'alpha') {
             checkAllChannelsAndGetBest().then(({ result, updater: updaterInstance }) => {
-                updaterInstance.autoInstallOnAppQuit = true;
+                // On Linux (AppImage) installing on quit runs `pkexec /bin/bash`,
+                // which pops a polkit root-auth prompt. Disable to avoid it.
+                updaterInstance.autoInstallOnAppQuit = !isLinux();
                 updaterInstance.autoRunAppAfterInstall = true;
                 if (isMacOS()) {
                     if (result?.isUpdateAvailable) {
@@ -197,14 +199,16 @@ function configureAndGetUpdater(): UpdaterInstance {
         updater.allowPrerelease = true;
         updater.disableDifferentialDownload = true;
         updater.allowDowngrade = true;
-        updater.autoInstallOnAppQuit = true;
+        // Avoid pkexec root prompt on quit for Linux AppImage installs.
+        updater.autoInstallOnAppQuit = !isLinux();
         updater.autoRunAppAfterInstall = true;
         return updater;
     }
 
     log.transports.file.level = 'info';
     autoUpdater.logger = autoUpdaterLogInterface;
-    autoUpdater.autoInstallOnAppQuit = true;
+    // Avoid pkexec root prompt on quit for Linux AppImage installs.
+    autoUpdater.autoInstallOnAppQuit = !isLinux();
     autoUpdater.autoRunAppAfterInstall = true;
 
     if (effectiveChannel === 'beta') {
@@ -227,7 +231,8 @@ function configureAndGetUpdater(): UpdaterInstance {
 function configureAutoUpdaterForChannel(channel: 'beta' | 'latest'): void {
     log.transports.file.level = 'info';
     autoUpdater.logger = autoUpdaterLogInterface;
-    autoUpdater.autoInstallOnAppQuit = true;
+    // Avoid pkexec root prompt on quit for Linux AppImage installs.
+    autoUpdater.autoInstallOnAppQuit = !isLinux();
     autoUpdater.autoRunAppAfterInstall = true;
     if (channel === 'beta') {
         autoUpdater.channel = 'beta';
