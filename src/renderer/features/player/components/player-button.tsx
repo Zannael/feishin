@@ -79,6 +79,7 @@ export const MainPlayButton = forwardRef<HTMLButtonElement, PlayButtonProps>(
                     onClick?.(e);
                 }}
                 ref={ref}
+                tabIndex={-1}
                 tooltip={{
                     label: isPaused ? (t('player.play') as string) : (t('player.pause') as string),
                     openDelay: 0,

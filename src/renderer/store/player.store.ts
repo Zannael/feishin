@@ -511,6 +511,7 @@ export const usePlayerStoreBase = createWithEqualityFn<PlayerState>()(
                                 state.player.status = PlayerStatus.PLAYING;
                                 state.player.playerNum = 1;
                                 setTimestampStore(0);
+                                state.player.seekToTimestamp = uniqueSeekToTimestamp(0);
                                 state.queue.default = newUniqueIds;
 
                                 if (state.player.shuffle === PlayerShuffle.TRACK) {
@@ -572,6 +573,7 @@ export const usePlayerStoreBase = createWithEqualityFn<PlayerState>()(
                                 state.player.status = PlayerStatus.PLAYING;
                                 state.player.playerNum = 1;
                                 setTimestampStore(0);
+                                state.player.seekToTimestamp = uniqueSeekToTimestamp(0);
                                 state.queue.default = shuffledIds;
 
                                 // Always maintain shuffled array when using Play.SHUFFLE
