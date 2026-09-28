@@ -3,11 +3,17 @@ import { useCallback, useEffect, useMemo, useState, WheelEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { PopoverPlayQueue } from '/@/renderer/features/now-playing/components/popover-play-queue';
+import { DlnaCastButton } from '/@/renderer/features/player/components/dlna-cast-button';
+import { DlnaVolumeButton } from '/@/renderer/features/player/components/dlna/volume-button';
 import { PlayerConfig } from '/@/renderer/features/player/components/player-config';
 import { CustomPlayerbarSlider } from '/@/renderer/features/player/components/playerbar-slider';
 import { SleepTimerButton } from '/@/renderer/features/player/components/sleep-timer-button';
 import { usePlayer } from '/@/renderer/features/player/context/player-context';
 import { useAudioDevices } from '/@/renderer/features/settings/components/playback/audio-settings';
+import {
+    ListConfigBooleanControl,
+    ListConfigTable,
+} from '/@/renderer/features/shared/components/list-config-menu';
 import { useSetRating } from '/@/renderer/features/shared/hooks/use-set-rating';
 import { useCreateFavorite } from '/@/renderer/features/shared/mutations/create-favorite-mutation';
 import { useDeleteFavorite } from '/@/renderer/features/shared/mutations/delete-favorite-mutation';
@@ -20,7 +26,6 @@ import {
     useAutoDJSettings,
     useCurrentServer,
     useFullScreenPlayerStore,
-    useGeneralSettings,
     useHotkeySettings,
     usePlaybackSettings,
     usePlaybackType,
@@ -30,9 +35,10 @@ import {
     usePlayerVolume,
     useSetFullScreenPlayerStore,
     useSettingsStoreActions,
+    useShowFavorites,
+    useShowRatings,
     useSidebarRightExpanded,
     useSideQueueType,
-    useVolumeMax,
     useVolumeWheelStep,
     useVolumeWidth,
 } from '/@/renderer/store';
@@ -48,27 +54,25 @@ import { Popover } from '/@/shared/components/popover/popover';
 import { Rating } from '/@/shared/components/rating/rating';
 import { SegmentedControl } from '/@/shared/components/segmented-control/segmented-control';
 import { Select } from '/@/shared/components/select/select';
+import { Slider } from '/@/shared/components/slider/slider';
 import { Stack } from '/@/shared/components/stack/stack';
-import { Switch } from '/@/shared/components/switch/switch';
-import { Text } from '/@/shared/components/text/text';
 import { useMediaQuery } from '/@/shared/hooks/use-media-query';
 import { useThrottledCallback } from '/@/shared/hooks/use-throttled-callback';
 import { useThrottledValue } from '/@/shared/hooks/use-throttled-value';
 import { LibraryItem, QueueSong, ServerType } from '/@/shared/types/domain-types';
 import { PlayerType } from '/@/shared/types/types';
 
-const calculateVolumeUp = (volume: number, volumeWheelStep: number, volumeMax: number) => {
+const calculateVolumeUp = (volume: number, volumeWheelStep: number) => {
     let volumeToSet: number;
-    const newVolumeGreaterThanMax = volume + volumeWheelStep > volumeMax;
-    if (newVolumeGreaterThanMax) {
-        volumeToSet = volumeMax;
+    const newVolumeGreaterThanHundred = volume + volumeWheelStep > 100;
+    if (newVolumeGreaterThanHundred) {
+        volumeToSet = 100;
     } else {
         volumeToSet = volume + volumeWheelStep;
     }
 
     return volumeToSet;
 };
-
 const calculateVolumeDown = (volume: number, volumeWheelStep: number) => {
     let volumeToSet: number;
     const newVolumeLessThanZero = volume - volumeWheelStep < 0;
@@ -82,7 +86,9 @@ const calculateVolumeDown = (volume: number, volumeWheelStep: number) => {
 };
 
 export const RightControls = () => {
-    const { showRatings } = useGeneralSettings();
+    const showRatings = useShowRatings();
+    const showFavorites = useShowFavorites();
+    const playbackType = usePlaybackType();
     return (
         <Flex align="flex-end" direction="column" h="100%" px="1rem" py="0.5rem">
             <Group h="calc(100% / 3)">
@@ -90,12 +96,13 @@ export const RightControls = () => {
                 <AutoDJButton />
             </Group>
             <Group align="center" gap="xs" wrap="nowrap">
+                <DlnaCastButton />
                 <SleepTimerButton />
                 <PlayerConfig />
                 <LyricsButton />
-                <FavoriteButton />
+                {showFavorites && <FavoriteButton />}
                 <QueueButton />
-                <VolumeButton />
+                {playbackType === PlayerType.DLNA ? <DlnaVolumeButton /> : <VolumeButton />}
             </Group>
             <Group h="calc(100% / 3)" />
         </Flex>
@@ -106,13 +113,6 @@ const AutoDJButton = () => {
     const { t } = useTranslation();
     const settings = useAutoDJSettings();
     const { setSettings } = useSettingsStoreActions();
-
-    const itemLabels = useMemo(() => {
-        return {
-            description: t('setting.autoDJ_itemCount_description'),
-            title: t('setting.autoDJ_itemCount'),
-        };
-    }, [t]);
 
     const strategySelectData = useMemo(
         () => [
@@ -128,21 +128,167 @@ const AutoDJButton = () => {
         [t],
     );
 
-    const strategyLabels =
+    const strategyTitle =
         settings.mode === AUTO_DJ_MODE.ALBUMS
-            ? {
-                  description: '',
-                  title: t('setting.autoDJ_albumStrategy'),
-              }
-            : {
-                  description: '',
-                  title: t('setting.autoDJ_songStrategy'),
-              };
+            ? t('setting.autoDJ_albumStrategy')
+            : t('setting.autoDJ_songStrategy');
 
     const strategyValue =
         settings.mode === AUTO_DJ_MODE.ALBUMS
             ? (settings.albumStrategy ?? AUTO_DJ_STRATEGY.SIMILAR)
             : (settings.songStrategy ?? AUTO_DJ_STRATEGY.SIMILAR);
+
+    const enabledOptions = useMemo(
+        () => [
+            {
+                component: (
+                    <ListConfigBooleanControl
+                        onChange={(value) => {
+                            setSettings({
+                                autoDJ: { enabled: value },
+                            });
+                        }}
+                        value={settings.enabled}
+                    />
+                ),
+                id: 'enabled',
+                label: t('setting.autoDJ_enabled'),
+            },
+        ],
+        [setSettings, settings.enabled, t],
+    );
+
+    const configOptions = useMemo(
+        () => [
+            {
+                component: (
+                    <Select
+                        comboboxProps={{ withinPortal: false }}
+                        data={strategySelectData}
+                        onChange={(value) => {
+                            if (!value) return;
+                            setSettings({
+                                autoDJ:
+                                    settings.mode === AUTO_DJ_MODE.ALBUMS
+                                        ? { albumStrategy: value as AutoDJStrategy }
+                                        : { songStrategy: value as AutoDJStrategy },
+                            });
+                        }}
+                        size="sm"
+                        value={strategyValue}
+                        variant="filled"
+                        w="160px"
+                    />
+                ),
+                id: 'strategy',
+                label: strategyTitle,
+            },
+            {
+                component: (
+                    <NumberInput
+                        aria-label={t('setting.autoDJ_itemCount')}
+                        hideControls={false}
+                        max={50}
+                        min={1}
+                        onChange={(e) =>
+                            setSettings({
+                                autoDJ: {
+                                    itemCount: Number(e),
+                                },
+                            })
+                        }
+                        size="sm"
+                        value={Number(settings.itemCount)}
+                        variant="filled"
+                        w="96px"
+                    />
+                ),
+                description: t('setting.autoDJ_itemCount_description'),
+                id: 'itemCount',
+                label: t('setting.autoDJ_itemCount'),
+            },
+            {
+                component: (
+                    <Slider
+                        aria-label={t('setting.autoDJ_timing')}
+                        marks={[
+                            { label: '1', value: 1 },
+                            { label: '2', value: 2 },
+                            { label: '3', value: 3 },
+                            { label: '4', value: 4 },
+                            { label: '5', value: 5 },
+                        ]}
+                        max={5}
+                        min={1}
+                        onChange={(e) =>
+                            setSettings({
+                                autoDJ: {
+                                    timing: Number(e),
+                                },
+                            })
+                        }
+                        size="sm"
+                        value={Number(settings.timing)}
+                        variant="filled"
+                        w="144px"
+                    />
+                ),
+                description: t('setting.autoDJ_timing_description'),
+                id: 'timing',
+                label: t('setting.autoDJ_timing'),
+            },
+        ],
+        [
+            setSettings,
+            settings.itemCount,
+            settings.mode,
+            settings.timing,
+            strategySelectData,
+            strategyTitle,
+            strategyValue,
+            t,
+        ],
+    );
+
+    const toggleOptions = useMemo(
+        () => [
+            {
+                component: (
+                    <ListConfigBooleanControl
+                        onChange={(value) => {
+                            setSettings({
+                                autoDJ: {
+                                    allowDuplicates: value,
+                                },
+                            });
+                        }}
+                        value={settings.allowDuplicates}
+                    />
+                ),
+                description: t('setting.autoDJ_allowDuplicates_description'),
+                id: 'allowDuplicates',
+                label: t('setting.autoDJ_allowDuplicates'),
+            },
+            {
+                component: (
+                    <ListConfigBooleanControl
+                        onChange={(value) => {
+                            setSettings({
+                                autoDJ: {
+                                    onlySimilar: value,
+                                },
+                            });
+                        }}
+                        value={settings.onlySimilar}
+                    />
+                ),
+                description: t('setting.autoDJ_onlySimilar_description'),
+                id: 'onlySimilar',
+                label: t('setting.autoDJ_onlySimilar'),
+            },
+        ],
+        [setSettings, settings.allowDuplicates, settings.onlySimilar, t],
+    );
 
     return (
         <Popover position="top-end" withArrow>
@@ -159,22 +305,10 @@ const AutoDJButton = () => {
                     {t('setting.autoDJ')}
                 </Button>
             </Popover.Target>
-            <Popover.Dropdown maw={320} miw={260} onClick={(e) => e.stopPropagation()} p="sm">
+            <Popover.Dropdown maw={480} miw={320} onClick={(e) => e.stopPropagation()} p="sm">
                 <Stack gap="sm">
                     <Paper p="md" radius="md">
-                        <Group align="center" gap="xs" justify="space-between" wrap="nowrap">
-                            <Text fw={600} isNoSelect size="sm">
-                                {t('setting.autoDJ_enabled')}
-                            </Text>
-                            <Switch
-                                checked={settings.enabled}
-                                onChange={(e) =>
-                                    setSettings({
-                                        autoDJ: { enabled: e.currentTarget.checked },
-                                    })
-                                }
-                            />
-                        </Group>
+                        <ListConfigTable options={enabledOptions} />
                     </Paper>
                     <SegmentedControl
                         data={[
@@ -194,58 +328,12 @@ const AutoDJButton = () => {
                         value={settings.mode}
                         w="100%"
                     />
-                    <Select
-                        comboboxProps={{ withinPortal: false }}
-                        data={strategySelectData}
-                        description={strategyLabels.description}
-                        label={strategyLabels.title}
-                        onChange={(value) => {
-                            if (!value) return;
-                            setSettings({
-                                autoDJ:
-                                    settings.mode === AUTO_DJ_MODE.ALBUMS
-                                        ? { albumStrategy: value as AutoDJStrategy }
-                                        : { songStrategy: value as AutoDJStrategy },
-                            });
-                        }}
-                        size="md"
-                        value={strategyValue}
-                        w="100%"
-                    />
-                    <NumberInput
-                        aria-label={itemLabels.title}
-                        description={itemLabels.description}
-                        hideControls={false}
-                        label={itemLabels.title}
-                        max={50}
-                        min={1}
-                        onChange={(e) =>
-                            setSettings({
-                                autoDJ: {
-                                    itemCount: Number(e),
-                                },
-                            })
-                        }
-                        size="md"
-                        value={Number(settings.itemCount)}
-                    />
-                    <NumberInput
-                        aria-label={t('setting.autoDJ_timing')}
-                        description={t('setting.autoDJ_timing_description')}
-                        hideControls={false}
-                        label={t('setting.autoDJ_timing')}
-                        max={5}
-                        min={1}
-                        onChange={(e) =>
-                            setSettings({
-                                autoDJ: {
-                                    timing: Number(e),
-                                },
-                            })
-                        }
-                        size="md"
-                        value={Number(settings.timing)}
-                    />
+                    <Paper p="md" radius="md">
+                        <ListConfigTable options={configOptions} />
+                    </Paper>
+                    <Paper p="md" radius="md">
+                        <ListConfigTable options={toggleOptions} />
+                    </Paper>
                 </Stack>
             </Popover.Dropdown>
         </Popover>
@@ -257,43 +345,24 @@ const QueueButton = () => {
     const isSidebarRightExpanded = useSidebarRightExpanded();
     const { setSideBar } = useAppStoreActions();
     const sideQueueType = useSideQueueType();
-
     const { bindings } = useHotkeySettings();
-
     const [popoverOpened, setPopoverOpened] = useState(false);
-
     const handleToggleQueue = () => {
-        if (sideQueueType === 'sideQueue') {
-            setSideBar({ rightExpanded: !isSidebarRightExpanded });
-        } else {
-            setPopoverOpened((prev) => !prev);
-        }
+        if (sideQueueType === 'sideQueue') setSideBar({ rightExpanded: !isSidebarRightExpanded });
+        else setPopoverOpened((prev) => !prev);
     };
-
-    const handlePopoverClose = () => {
-        setPopoverOpened(false);
-    };
-
     useHotkeys([
         [bindings.toggleQueue.isGlobal ? '' : bindings.toggleQueue.hotkey, handleToggleQueue],
     ]);
-
-    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-        e.stopPropagation();
-
-        if (sideQueueType === 'sideQueue') {
-            return handleToggleQueue();
-        }
-    };
-
     if (sideQueueType === 'sideQueue') {
         return (
             <ActionIcon
                 icon={isSidebarRightExpanded ? 'panelRightClose' : 'panelRightOpen'}
-                iconProps={{
-                    size: 'lg',
+                iconProps={{ size: 'lg' }}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleQueue();
                 }}
-                onClick={handleClick}
                 size="sm"
                 tooltip={{
                     label: t('player.viewQueue'),
@@ -303,10 +372,9 @@ const QueueButton = () => {
             />
         );
     }
-
     return (
         <PopoverPlayQueue
-            onClose={handlePopoverClose}
+            onClose={() => setPopoverOpened(false)}
             onToggle={(e) => {
                 e.stopPropagation();
                 handleToggleQueue();
@@ -319,13 +387,8 @@ const QueueButton = () => {
 const LyricsButton = () => {
     const setFullScreenPlayerStore = useSetFullScreenPlayerStore();
     const activeTab = useFullScreenPlayerStore((state) => state.activeTab);
-
     const { setStore } = useFullScreenPlayerStoreActions();
     const { expanded: isFullScreenPlayerExpanded } = useFullScreenPlayerStore();
-
-    const expandFullScreenPlayer = () => {
-        setFullScreenPlayerStore({ expanded: !isFullScreenPlayerExpanded });
-    };
 
     return (
         <ActionIcon
@@ -336,8 +399,12 @@ const LyricsButton = () => {
             }}
             onClick={(e) => {
                 e.stopPropagation();
-                if (!isFullScreenPlayerExpanded) setStore({ activeTab: 'lyrics' });
-                expandFullScreenPlayer();
+                if (!isFullScreenPlayerExpanded) {
+                    setStore({ activeTab: 'lyrics' });
+                    setFullScreenPlayerStore({ expanded: true });
+                } else {
+                    setStore({ activeTab: activeTab === 'lyrics' ? '' : 'lyrics' });
+                }
             }}
             role="button"
             size="sm"
@@ -353,50 +420,31 @@ const LyricsButton = () => {
 const FavoriteButton = () => {
     const currentSong = usePlayerSong();
     const { bindings } = useHotkeySettings();
-
     const addToFavoritesMutation = useCreateFavorite({});
     const removeFromFavoritesMutation = useDeleteFavorite({});
-
     const handleAddToFavorites = (song: QueueSong | undefined) => {
         if (!song?.id) return;
-
         addToFavoritesMutation.mutate({
-            apiClientProps: { serverId: song?._serverId || '' },
-            query: {
-                id: [song.id],
-                type: LibraryItem.SONG,
-            },
+            apiClientProps: { serverId: song._serverId || '' },
+            query: { id: [song.id], type: LibraryItem.SONG },
         });
     };
-
     const handleRemoveFromFavorites = (song: QueueSong | undefined) => {
         if (!song?.id) return;
-
         removeFromFavoritesMutation.mutate({
-            apiClientProps: { serverId: song?._serverId || '' },
-            query: {
-                id: [song.id],
-                type: LibraryItem.SONG,
-            },
+            apiClientProps: { serverId: song._serverId || '' },
+            query: { id: [song.id], type: LibraryItem.SONG },
         });
     };
-
     const handleToggleFavorite = (song: QueueSong | undefined) => {
         if (!song?.id) return;
-
-        if (song.userFavorite) {
-            handleRemoveFromFavorites(song);
-        } else {
-            handleAddToFavorites(song);
-        }
+        song.userFavorite ? handleRemoveFromFavorites(song) : handleAddToFavorites(song);
     };
-
     useFavoritePreviousSongHotkeys({
         handleAddToFavorites,
         handleRemoveFromFavorites,
         handleToggleFavorite,
     });
-
     useHotkeys([
         [
             bindings.favoriteCurrentAdd.isGlobal ? '' : bindings.favoriteCurrentAdd.hotkey,
@@ -411,14 +459,10 @@ const FavoriteButton = () => {
             () => handleToggleFavorite(currentSong),
         ],
     ]);
-
     return (
         <ActionIcon
             icon="favorite"
-            iconProps={{
-                fill: currentSong?.userFavorite ? 'primary' : undefined,
-                size: 'lg',
-            }}
+            iconProps={{ fill: currentSong?.userFavorite ? 'primary' : undefined, size: 'lg' }}
             onClick={(e) => {
                 e.stopPropagation();
                 handleToggleFavorite(currentSong);
@@ -444,7 +488,6 @@ const useFavoritePreviousSongHotkeys = ({
 }) => {
     const { bindings } = useHotkeySettings();
     const { previousSong } = usePlayerData();
-
     useHotkeys([
         [
             bindings.favoritePreviousAdd.isGlobal ? '' : bindings.favoritePreviousAdd.hotkey,
@@ -459,7 +502,6 @@ const useFavoritePreviousSongHotkeys = ({
             () => handleToggleFavorite(previousSong),
         ],
     ]);
-
     return null;
 };
 
@@ -467,20 +509,15 @@ const RatingButton = () => {
     const server = useCurrentServer();
     const currentSong = usePlayerSong();
     const setRating = useSetRating();
-
+    const { bindings } = useHotkeySettings();
     const isSongDefined = Boolean(currentSong?.id);
     const showRating =
         isSongDefined &&
         (server?.type === ServerType.NAVIDROME || server?.type === ServerType.SUBSONIC);
-
     const handleUpdateRating = (rating: number) => {
         if (!currentSong) return;
-
         setRating(currentSong._serverId, [currentSong.id], LibraryItem.SONG, rating);
     };
-
-    const { bindings } = useHotkeySettings();
-
     useHotkeys([
         [bindings.rate0.isGlobal ? '' : bindings.rate0.hotkey, () => handleUpdateRating(0)],
         [bindings.rate1.isGlobal ? '' : bindings.rate1.hotkey, () => handleUpdateRating(1)],
@@ -489,7 +526,6 @@ const RatingButton = () => {
         [bindings.rate4.isGlobal ? '' : bindings.rate4.hotkey, () => handleUpdateRating(4)],
         [bindings.rate5.isGlobal ? '' : bindings.rate5.hotkey, () => handleUpdateRating(5)],
     ]);
-
     return (
         <>
             {showRating && (
@@ -509,7 +545,6 @@ const VolumeButton = () => {
     const muted = usePlayerMuted();
     const volumeWheelStep = useVolumeWheelStep();
     const volumeWidth = useVolumeWidth();
-    const volumeMax = useVolumeMax();
     const { decreaseVolume, increaseVolume, mediaToggleMute, setVolume } = usePlayer();
     const isMinWidth = useMediaQuery('(max-width: 480px)');
 
@@ -571,12 +606,12 @@ const VolumeButton = () => {
             if (e.deltaY > 0 || e.deltaX > 0) {
                 volumeToSet = calculateVolumeDown(volume, volumeWheelStep);
             } else {
-                volumeToSet = calculateVolumeUp(volume, volumeWheelStep, volumeMax);
+                volumeToSet = calculateVolumeUp(volume, volumeWheelStep);
             }
 
             setVolume(volumeToSet);
         },
-        [setVolume, volume, volumeWheelStep, volumeMax],
+        [setVolume, volume, volumeWheelStep],
     );
 
     const handleVolumeDownThrottled = useThrottledCallback(handleVolumeDown, 100);
@@ -640,7 +675,7 @@ const VolumeButton = () => {
             </ContextMenu>
             {!isMinWidth ? (
                 <CustomPlayerbarSlider
-                    max={volumeMax}
+                    max={100}
                     min={0}
                     onChange={handleVolumeSlider}
                     onClick={(e) => {
